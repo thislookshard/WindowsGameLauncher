@@ -1,70 +1,70 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 using System.Diagnostics;
-
 using WindowsGameLauncher.Models;
+
+namespace WindowsGameLauncher.Services;
 
 public class LauncherService
 {
-    private LogService _logService;
+    private readonly LogService _logService;
+
     public LauncherService(LogService logService)
     {
         _logService = logService;
     }
 
     public Process Launch(GameLaunchProfile profile, int attempt, out LaunchSession session)
-    {   
-        session = null;
-        Process process = null;
-  
+    {
         _logService.Info($"Launching game: {profile.GameName}");
-        ProcessStartInfo startInfo = new ProcessStartInfo
+
+        var startInfo = new ProcessStartInfo
         {
             FileName = profile.ExePath,
             WorkingDirectory = profile.WorkingDirectory,
+            Arguments = profile.Arguments,
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
 
-        foreach (var envVar in profile.environmentVariables)
+        foreach (var envVar in profile.EnvironmentVariables)
         {
-            startInfo.Environment[envVar.Key] = envVar.Value.ToString();
+            startInfo.Environment[envVar.Key] = envVar.Value;
         }
 
-        process = new Process
+        var process = new Process
         {
-            StartInfo = startInfo
+            StartInfo = startInfo,
+            EnableRaisingEvents = true
         };
 
-        process.OutputDataReceived += (sender, args) => 
+        process.OutputDataReceived += (_, args) =>
         {
-            if (!string.IsNullOrEmpty(args.Data))
+            if (!string.IsNullOrWhiteSpace(args.Data))
                 _logService.Info($"[Game Output] {args.Data}");
         };
-        process.ErrorDataReceived += (sender, args) => 
+
+        process.ErrorDataReceived += (_, args) =>
         {
-            if (!string.IsNullOrEmpty(args.Data))
+            if (!string.IsNullOrWhiteSpace(args.Data))
                 _logService.Error($"[Game Error] {args.Data}");
         };
 
-        process.Start();
+        if (!process.Start())
+            throw new InvalidOperationException($"Failed to start '{profile.GameName}'.");
+
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
-        _logService.Info($"Game launched with PID: {process.Id}");
-        
         session = new LaunchSession
         {
             ProcessId = process.Id,
             ProfileName = profile.GameName,
-            AttemptNumber = attempt
+            AttemptNumber = attempt,
+            StartTimeUtc = DateTimeOffset.UtcNow
         };
 
+        _logService.Info($"Game launched with PID: {process.Id}");
 
         return process;
     }
-
 }

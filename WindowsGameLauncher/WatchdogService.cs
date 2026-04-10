@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.IO.Pipelines;
 using WindowsGameLauncher.Models;
 
 namespace WindowsGameLauncher.Services;
@@ -32,8 +31,7 @@ public class WatchdogService
             attempt++;
 
             _log.Info(
-                $"Launching '{profile.GameName}' (attempt {attempt}/{Math.Max(1, profile.MaxRestarts + 1)})..."
-            );
+                $"Launching '{profile.GameName}' (attempt {attempt}/{Math.Max(1, profile.MaxRestarts + 1)})...");
 
             Process process;
             LaunchSession session;
@@ -45,6 +43,7 @@ public class WatchdogService
             catch (Exception ex)
             {
                 _log.Error($"Launch attempt failed: {ex.Message}");
+
                 if (attempt > profile.MaxRestarts)
                 {
                     _log.Error($"Max restart attempts reached for '{profile.GameName}'. Aborting.");
@@ -53,15 +52,14 @@ public class WatchdogService
 
                 _log.Warning(
                     $"Will retry launching '{profile.GameName}' in {profile.RestartDelaySeconds}s. " +
-                    $"Attempt {attempt} of {profile.MaxRestarts}."
-                );
+                    $"Attempt {attempt} of {profile.MaxRestarts}.");
 
                 await Task.Delay(TimeSpan.FromSeconds(profile.RestartDelaySeconds), cancellationToken);
                 continue;
             }
 
-
             LaunchResult result = await _monitor.MonitorAsync(process, profile, session, cancellationToken);
+            LogResult(profile, result);
 
             bool shouldRestart =
                 profile.ShouldRestartOnCrash &&
@@ -84,20 +82,25 @@ public class WatchdogService
 
     private void LogResult(GameLaunchProfile profile, LaunchResult result)
     {
-        string sessionId = result.Session != null ? $"SessionID={result.Session.SessionId}" : "No session";
-        string exitCodeText = result.ExitCode.HasValue ? $"ExitCode={result.ExitCode.Value}" : "ExitCode=N/A";  
+        string sessionId = $"SessionID={result.Session.SessionId}";
+        string exitCodeText = result.ExitCode.HasValue
+            ? $"ExitCode={result.ExitCode.Value}"
+            : "ExitCode=N/A";
+
         if (result.TimedOutAsHung)
         {
-            _log.Warning($"'{profile.GameName}' timed out and was treated as hung.\n" +
-                         $"{sessionId}, {exitCodeText}");
+            _log.Warning(
+                $"'{profile.GameName}' timed out and was treated as hung. {sessionId}, {exitCodeText}");
         }
         else if (!result.ExitedNormally)
         {
-            _log.Warning($"'{profile.GameName}' exited abnormally with code {exitCodeText}.");
+            _log.Warning(
+                $"'{profile.GameName}' exited abnormally. {sessionId}, {exitCodeText}, Message='{result.Message}'");
         }
         else
         {
-            _log.Info($"'{profile.GameName}' exited normally with code {exitCodeText}.");
+            _log.Info(
+                $"'{profile.GameName}' exited normally. {sessionId}, {exitCodeText}");
         }
     }
 }

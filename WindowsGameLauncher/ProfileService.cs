@@ -1,64 +1,57 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-
+using System.Text.Json;
 using WindowsGameLauncher.Models;
 
 namespace WindowsGameLauncher.Services;
+
 public class ProfileService
 {
     public GameLaunchProfile Load(string jsonPath)
     {
-        
-        if (string.IsNullOrEmpty(jsonPath) || !File.Exists(jsonPath)) 
-            throw new InvalidDataException("Invalid JSON path");
-
+        if (string.IsNullOrWhiteSpace(jsonPath) || !File.Exists(jsonPath))
+            throw new InvalidDataException($"Invalid JSON path: '{jsonPath}'");
 
         string json = File.ReadAllText(jsonPath);
-        System.Text.Json.JsonSerializerOptions options = new System.Text.Json.JsonSerializerOptions
+
+        var options = new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true,
-            ReadCommentHandling = System.Text.Json.JsonCommentHandling.Skip,
-            AllowTrailingCommas = true,
-            IncludeFields = true
+            ReadCommentHandling = JsonCommentHandling.Skip,
+            AllowTrailingCommas = true
         };
-        
-        GameLaunchProfile? profile = null;
+
+        GameLaunchProfile? profile;
         try
         {
-            profile = System.Text.Json.JsonSerializer.Deserialize<GameLaunchProfile>(json, options);
+            profile = JsonSerializer.Deserialize<GameLaunchProfile>(json, options);
         }
-        catch (System.Text.Json.JsonException ex)
+        catch (JsonException ex)
         {
-            throw new InvalidDataException("Failed to parse JSON: " + ex.Message);
+            throw new InvalidDataException("Failed to parse JSON: " + ex.Message, ex);
         }
-        
 
         if (profile is null)
-            throw new InvalidOperationException("Failed to parse JSON: Deserialized object is null");
+            throw new InvalidOperationException("Failed to parse JSON: deserialized object is null.");
 
         ValidateProfile(profile);
         return profile;
     }
 
-    private void ValidateProfile(GameLaunchProfile profile)
+    private static void ValidateProfile(GameLaunchProfile profile)
     {
-        if (string.IsNullOrEmpty(profile.GameName))
-            throw new InvalidDataException("Game name is required");
+        if (string.IsNullOrWhiteSpace(profile.GameName))
+            throw new InvalidDataException("GameName is required.");
 
-        if (string.IsNullOrEmpty(profile.ExePath)) 
-            throw new InvalidDataException("Executable path is required");
+        if (string.IsNullOrWhiteSpace(profile.ExePath))
+            throw new InvalidDataException("ExePath is required.");
 
         if (!File.Exists(profile.ExePath))
-            throw new FileNotFoundException("Executable not found at path: " + profile.ExePath);
+            throw new FileNotFoundException("Executable not found.", profile.ExePath);
 
-        if (string.IsNullOrEmpty(profile.WorkingDirectory))
-        {
-            profile.WorkingDirectory = Path.GetDirectoryName(profile.ExePath);
-        }
+        if (string.IsNullOrWhiteSpace(profile.WorkingDirectory))
+            profile.WorkingDirectory = Path.GetDirectoryName(profile.ExePath) ?? string.Empty;
 
+        if (string.IsNullOrWhiteSpace(profile.WorkingDirectory) || !Directory.Exists(profile.WorkingDirectory))
+            throw new DirectoryNotFoundException(
+                $"Working directory does not exist: '{profile.WorkingDirectory}'");
     }
 }
-
-
