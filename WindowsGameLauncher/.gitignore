@@ -1,0 +1,8 @@
+*.dll
+*.json
+*.txt
+*.log
+bin/
+obj/
+.vs/
+Log/

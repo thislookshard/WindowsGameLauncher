@@ -40,7 +40,7 @@ public class WatchdogService
 
             try
             {
-                process = _launcher.LaunchGame(profile, attempt, out session);
+                process = _launcher.Launch(profile, attempt, out session);
             }
             catch (Exception ex)
             {

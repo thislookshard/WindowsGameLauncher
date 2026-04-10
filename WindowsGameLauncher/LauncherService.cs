@@ -14,7 +14,7 @@ public class LauncherService
         _logService = logService;
     }
 
-    public Process LaunchGame(GameLaunchProfile profile, int attempt, out LaunchSession session)
+    public Process Launch(GameLaunchProfile profile, int attempt, out LaunchSession session)
     {   
         session = null;
         Process process = null;
@@ -62,11 +62,6 @@ public class LauncherService
             ProfileName = profile.GameName,
             AttemptNumber = attempt
         };
-
-        // result.Session = session;
-        // result.StartedSuccessfully = true;
-        // result.TimedOutAsHung = false;
-        // result.Message = "Success";
 
 
         return process;
