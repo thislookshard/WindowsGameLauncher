@@ -31,7 +31,7 @@ public class WatchdogService
             attempt++;
 
             _log.Info(
-                $"Launching '{profile.GameName}' (attempt {attempt}/{Math.Max(1, profile.MaxRestarts + 1)})...");
+                $"Launching '{profile.GameName}' (attempt {attempt}/{Math.Max(1, profile.MaxRestarts)})...");
 
             Process process;
             LaunchSession session;

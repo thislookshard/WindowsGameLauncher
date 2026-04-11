@@ -24,41 +24,55 @@ public class ProcessMonitorService
             Session = session
         };
 
-        if (profile.MaxHangTimeSeconds > 0)
-        {
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeoutCts.CancelAfter(TimeSpan.FromSeconds(profile.MaxHangTimeSeconds));
+        var snapshotTask = MonitorSnapshotsAsync(process, session, cancellationToken);
 
+        try
+        {
+            if (profile.MaxHangTimeSeconds > 0)
+            {
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeoutCts.CancelAfter(TimeSpan.FromSeconds(profile.MaxHangTimeSeconds));
+
+                try
+                {
+                    await process.WaitForExitAsync(timeoutCts.Token);
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    result.TimedOutAsHung = true;
+                    result.Message = "Process exceeded configured hang timeout.";
+                    TryKill(process);
+                    FinalizeSession(session);
+                    _log.Warning($"PID={process.Id} timed out and was terminated.");
+                    return result;
+                }
+            }
+            else
+            {
+                await process.WaitForExitAsync(cancellationToken);
+            }
+
+            result.ExitCode = process.ExitCode;
+            result.ExitedNormally = process.ExitCode == 0;
+            result.Message = result.ExitedNormally
+                ? "Process exited normally."
+                : $"Process exited with code {process.ExitCode}.";
+
+            FinalizeSession(session);
+
+            _log.Info($"PID={process.Id} exited with code {process.ExitCode}");
+            return result;
+        }
+        finally
+        {
             try
             {
-                await process.WaitForExitAsync(timeoutCts.Token);
+                await snapshotTask;
             }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                result.TimedOutAsHung = true;
-                result.Message = "Process exceeded configured hang timeout.";
-                TryKill(process);
-                FinalizeSession(session);
-                _log.Warning($"PID={process.Id} timed out and was terminated.");
-                return result;
             }
         }
-        else
-        {
-            await process.WaitForExitAsync(cancellationToken);
-        }
-
-        result.ExitCode = process.ExitCode;
-        result.ExitedNormally = process.ExitCode == 0;
-        result.Message = result.ExitedNormally
-            ? "Process exited normally."
-            : $"Process exited with code {process.ExitCode}.";
-
-        FinalizeSession(session);
-
-        _log.Info($"PID={process.Id} exited with code {process.ExitCode}");
-
-        return result;
     }
 
     public ProcessSnapshot CaptureSnapshot(Process process)
@@ -72,6 +86,47 @@ public class ProcessMonitorService
             WorkingSetBytes = process.HasExited ? 0 : process.WorkingSet64,
             TotalProcessorTime = process.HasExited ? TimeSpan.Zero : process.TotalProcessorTime
         };
+    }
+
+    private async Task MonitorSnapshotsAsync(
+        Process process,
+        LaunchSession session,
+        CancellationToken cancellationToken)
+    {
+        string snapshotDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs", "snapshots");
+        Directory.CreateDirectory(snapshotDir);
+
+        string snapshotFile = Path.Combine(snapshotDir, $"snapshots_{session.SessionId}.log");
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            if (process.HasExited)
+                break;
+
+            try
+            {
+                var snapshot = CaptureSnapshot(process);
+
+                string line =
+                    $"{snapshot.TimestampUtc:u} " +
+                    $"PID={snapshot.ProcessId} " +
+                    $"Name={snapshot.ProcessName} " +
+                    $"Exited={snapshot.HasExited} " +
+                    $"WorkingSet={snapshot.WorkingSetBytes} " +
+                    $"CPU={snapshot.TotalProcessorTime}";
+
+                File.AppendAllText(snapshotFile, line + Environment.NewLine);
+            }
+            catch (Exception ex)
+            {
+                _log.Warning($"Failed to capture process snapshot: {ex.Message}");
+            }
+
+            var delayTask = Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            var exitTask = process.WaitForExitAsync(cancellationToken);
+
+            await Task.WhenAny(delayTask, exitTask);
+        }
     }
 
     private void FinalizeSession(LaunchSession session)

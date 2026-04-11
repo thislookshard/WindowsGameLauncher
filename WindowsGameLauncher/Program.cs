@@ -6,17 +6,16 @@ internal class Program
 {
     async static Task<int> Main(string[] args)
     {
-        Console.WriteLine("Hello, World!");
         string profilePath = args.Length > 0 ? args[0] : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "gameProfile.json");
         string logDirectoryPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs");
 
         var logger = new LogService(logDirectoryPath);
-        var profileServce = new ProfileService();
+        var profileService = new ProfileService();
 
         logger.Info("Windows Game Launcher started.");
         try
         {
-            var profile = profileServce.Load(profilePath);
+            var profile = profileService.Load(profilePath);
             var launcher = new LauncherService(logger);
             var watchdog = new WatchdogService(logger, launcher, new ProcessMonitorService(logger));
             await watchdog.RunWithRecoveryAsync(profile);
@@ -25,7 +24,7 @@ internal class Program
         }
         catch (Exception ex)
         {
-            logger.Error(ex.Message);
+            logger.Error(ex.ToString());
             return 1;
         }
     }
