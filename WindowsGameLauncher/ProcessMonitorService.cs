@@ -24,7 +24,7 @@ public class ProcessMonitorService
             Session = session
         };
 
-        var snapshotTask = MonitorSnapshotsAsync(process, session, profile,cancellationToken);
+        var snapshotTask = MonitorSnapshotsAsync(process, session, cancellationToken);
 
         try
         {
@@ -35,7 +35,7 @@ public class ProcessMonitorService
 
                 try
                 {
-                    await process.WaitForExitAsync(timeoutCts.Token);
+                   await MonitorProcessAsync(process, profile, result, timeoutCts.Token);
                 }
                 catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                 {
@@ -75,36 +75,20 @@ public class ProcessMonitorService
         }
     }
 
-    public ProcessSnapshot CaptureSnapshot(Process process)
+    private async Task MonitorProcessAsync(Process process, GameLaunchProfile profile, LaunchResult result, CancellationToken cancellationToken)
     {
-        return new ProcessSnapshot
-        {
-            TimestampUtc = DateTimeOffset.UtcNow,
-            ProcessId = process.Id,
-            ProcessName = process.ProcessName,
-            HasExited = process.HasExited,
-            WorkingSetBytes = process.HasExited ? 0 : process.WorkingSet64,
-            TotalProcessorTime = process.HasExited ? TimeSpan.Zero : process.TotalProcessorTime
-        };
-    }
-
-    private async Task MonitorSnapshotsAsync(
-        Process process,
-        LaunchSession session,
-        GameLaunchProfile profile,
-        CancellationToken cancellationToken)
-    {
-        string snapshotDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs", "snapshots");
-        Directory.CreateDirectory(snapshotDir);
-
-        string snapshotFile = Path.Combine(snapshotDir, $"snapshots_{session.SessionId}.log");
         var cpuTime = process.TotalProcessorTime;
         var startIdleTime = DateTimeOffset.UtcNow;
-        while (!cancellationToken.IsCancellationRequested)
+
+        while (!cancellationToken.IsCancellationRequested && !process.HasExited)
         {
             if (process.HasExited)
+            {
+                result.ExitedNormally = process.ExitCode == 0;
+                result.ExitCode = process.ExitCode;
                 break;
-
+            }
+            
             var nextCpuTime = process.TotalProcessorTime;
             if (nextCpuTime > cpuTime)
             {
@@ -119,14 +103,37 @@ public class ProcessMonitorService
                     _log.Warning($"PID={process.Id} has been idle for {idleDuration.TotalSeconds}s.");
                 }
 
-                if (idleDuration.TotalSeconds > profile.MaxHangTimeSeconds * 2)
+                if (idleDuration.TotalSeconds > profile.MaxHangTimeSeconds)
                 {
                     _log.Error($"PID={process.Id} has been idle for {idleDuration.TotalSeconds}s, exceeding hang threshold. Terminating.");
                     TryKill(process);
+                    result.TimedOutAsHung = true;
+                    result.ExitedNormally = false;
+                    result.ExitCode = process.ExitCode;
+                    result.Message = "Process exceeded configured hang timeout.";
                     break;
                 }
             }
-            
+
+
+            await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+        }
+    }
+
+    private async Task MonitorSnapshotsAsync(
+        Process process,
+        LaunchSession session,
+        CancellationToken cancellationToken)
+    {
+        string snapshotDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs", "snapshots");
+        Directory.CreateDirectory(snapshotDir);
+
+        string snapshotFile = Path.Combine(snapshotDir, $"snapshots_{session.SessionId}.log");
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            if (process.HasExited)
+                break;
+
             try
             {
                 var snapshot = CaptureSnapshot(process);
@@ -151,6 +158,19 @@ public class ProcessMonitorService
 
             await Task.WhenAny(delayTask, exitTask);
         }
+    }
+
+    public ProcessSnapshot CaptureSnapshot(Process process)
+    {
+        return new ProcessSnapshot
+        {
+            TimestampUtc = DateTimeOffset.UtcNow,
+            ProcessId = process.Id,
+            ProcessName = process.ProcessName,
+            HasExited = process.HasExited,
+            WorkingSetBytes = process.HasExited ? 0 : process.WorkingSet64,
+            TotalProcessorTime = process.HasExited ? TimeSpan.Zero : process.TotalProcessorTime
+        };
     }
 
     private void FinalizeSession(LaunchSession session)
