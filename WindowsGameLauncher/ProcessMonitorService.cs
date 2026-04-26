@@ -1,10 +1,14 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using WindowsGameLauncher.Models;
 
 namespace WindowsGameLauncher.Services;
 
 public class ProcessMonitorService
 {
+    [DllImport("user32.dll")]
+    private static extern bool IsHungAppWindow(IntPtr hWnd);
+
     private readonly LogService _log;
 
     public ProcessMonitorService(LogService log)
@@ -28,29 +32,7 @@ public class ProcessMonitorService
 
         try
         {
-            if (profile.MaxHangTimeSeconds > 0)
-            {
-                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                timeoutCts.CancelAfter(TimeSpan.FromSeconds(profile.MaxHangTimeSeconds));
-
-                try
-                {
-                   await MonitorProcessAsync(process, profile, result, timeoutCts.Token);
-                }
-                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-                {
-                    result.TimedOutAsHung = true;
-                    result.Message = "Process exceeded configured hang timeout.";
-                    TryKill(process);
-                    FinalizeSession(session);
-                    _log.Warning($"PID={process.Id} timed out and was terminated.");
-                    return result;
-                }
-            }
-            else
-            {
-                await process.WaitForExitAsync(cancellationToken);
-            }
+            await MonitorProcessAsync(process, profile, result, cancellationToken);
 
             result.ExitCode = process.ExitCode;
             result.ExitedNormally = process.ExitCode == 0;
@@ -77,7 +59,6 @@ public class ProcessMonitorService
 
     private async Task MonitorProcessAsync(Process process, GameLaunchProfile profile, LaunchResult result, CancellationToken cancellationToken)
     {
-        var cpuTime = process.TotalProcessorTime;
         var startIdleTime = DateTimeOffset.UtcNow;
 
         while (!cancellationToken.IsCancellationRequested && !process.HasExited)
@@ -89,10 +70,9 @@ public class ProcessMonitorService
                 break;
             }
             
-            var nextCpuTime = process.TotalProcessorTime;
-            if (nextCpuTime > cpuTime)
+            bool isHung = process.MainWindowHandle != IntPtr.Zero && IsHungAppWindow(process.MainWindowHandle);
+            if (!isHung)
             {
-                cpuTime = nextCpuTime;
                 startIdleTime = DateTimeOffset.UtcNow;
             }
             else
@@ -100,12 +80,12 @@ public class ProcessMonitorService
                 var idleDuration = DateTimeOffset.UtcNow - startIdleTime;
                 if (idleDuration.TotalSeconds >= 30)
                 {
-                    _log.Warning($"PID={process.Id} has been idle for {idleDuration.TotalSeconds}s.");
+                    _log.Warning($"PID={process.Id} has been hung for {idleDuration.TotalSeconds}s.");
                 }
 
                 if (idleDuration.TotalSeconds > profile.MaxHangTimeSeconds)
                 {
-                    _log.Error($"PID={process.Id} has been idle for {idleDuration.TotalSeconds}s, exceeding hang threshold. Terminating.");
+                    _log.Error($"PID={process.Id} has been hung for {idleDuration.TotalSeconds}s, exceeding hang threshold. Terminating.");
                     TryKill(process);
                     result.TimedOutAsHung = true;
                     result.ExitedNormally = false;
