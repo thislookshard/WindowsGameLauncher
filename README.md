@@ -1,6 +1,6 @@
 # Windows Game Launcher
 
-A robust Windows console application for launching games with advanced monitoring, crash recovery, and watchdog functionality. Built with C# and .NET 10.0 with additional PowerShell helper scripts for launch orchestration, cleanup, and diagnostics.
+A Windows console application for launching games with advanced monitoring, crash recovery, and watchdog functionality. Built with C# and .NET 10.0 with additional PowerShell helper scripts for launch orchestration, cleanup, and diagnostics.
 
 ## Features
 

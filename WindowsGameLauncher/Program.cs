@@ -12,6 +12,7 @@ internal class Program
         var logger = new LogService(logDirectoryPath);
         var profileService = new ProfileService();
         logger.Info("Windows Game Launcher started.");
+        
         try
         {
             var profile = profileService.Load(profilePath);
