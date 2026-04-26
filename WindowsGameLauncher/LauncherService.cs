@@ -51,6 +51,13 @@ public class LauncherService
 
         if (!process.Start())
             throw new InvalidOperationException($"Failed to start '{profile.GameName}'.");
+        
+        if (!process.WaitForInputIdle(profile.MaxHangTimeSeconds * 1000))
+        {
+            _logService.Warning(
+                $"Process started but did not become idle within {profile.MaxHangTimeSeconds}s. " +
+                $"This may indicate a hang during startup.");
+        }
 
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();

@@ -24,7 +24,7 @@ public class ProcessMonitorService
             Session = session
         };
 
-        var snapshotTask = MonitorSnapshotsAsync(process, session, cancellationToken);
+        var snapshotTask = MonitorSnapshotsAsync(process, session, profile,cancellationToken);
 
         try
         {
@@ -91,18 +91,42 @@ public class ProcessMonitorService
     private async Task MonitorSnapshotsAsync(
         Process process,
         LaunchSession session,
+        GameLaunchProfile profile,
         CancellationToken cancellationToken)
     {
         string snapshotDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "logs", "snapshots");
         Directory.CreateDirectory(snapshotDir);
 
         string snapshotFile = Path.Combine(snapshotDir, $"snapshots_{session.SessionId}.log");
-
+        var cpuTime = process.TotalProcessorTime;
+        var startIdleTime = DateTimeOffset.UtcNow;
         while (!cancellationToken.IsCancellationRequested)
         {
             if (process.HasExited)
                 break;
 
+            var nextCpuTime = process.TotalProcessorTime;
+            if (nextCpuTime > cpuTime)
+            {
+                cpuTime = nextCpuTime;
+                startIdleTime = DateTimeOffset.UtcNow;
+            }
+            else
+            {
+                var idleDuration = DateTimeOffset.UtcNow - startIdleTime;
+                if (idleDuration.TotalSeconds >= 30)
+                {
+                    _log.Warning($"PID={process.Id} has been idle for {idleDuration.TotalSeconds}s.");
+                }
+
+                if (idleDuration.TotalSeconds > profile.MaxHangTimeSeconds * 2)
+                {
+                    _log.Error($"PID={process.Id} has been idle for {idleDuration.TotalSeconds}s, exceeding hang threshold. Terminating.");
+                    TryKill(process);
+                    break;
+                }
+            }
+            
             try
             {
                 var snapshot = CaptureSnapshot(process);
