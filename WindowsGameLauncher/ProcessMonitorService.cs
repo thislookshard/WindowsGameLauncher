@@ -6,8 +6,6 @@ namespace WindowsGameLauncher.Services;
 
 public class ProcessMonitorService
 {
-    [DllImport("user32.dll")]
-    private static extern bool IsHungAppWindow(IntPtr hWnd);
 
     private readonly LogService _log;
 
@@ -70,7 +68,7 @@ public class ProcessMonitorService
                 break;
             }
             
-            bool isHung = process.MainWindowHandle != IntPtr.Zero && IsHungAppWindow(process.MainWindowHandle);
+            bool isHung = process.Responding == false;
             if (!isHung)
             {
                 startIdleTime = DateTimeOffset.UtcNow;
